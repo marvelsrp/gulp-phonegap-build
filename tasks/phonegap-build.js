@@ -35,16 +35,15 @@ function start(taskRefs) {
       taskRefs.options.appId = appId;
       taskRefs.log.warn("APPID: " + appId);
     }
+      var buildHandler = responseHandler("Build", taskRefs, function () {
+                  if (taskRefs.options.download) downloadApps(taskRefs, taskRefs.done);
+                  else taskRefs.done();
+              });
 
-    var buildHandler = responseHandler("Build", taskRefs, function () {
-        if (taskRefs.options.download) downloadApps(taskRefs, taskRefs.done);
-        else taskRefs.done();
-    });
-
-    //There is a bug in PhoneGap Build API that doesn't allow to trigger build for all platforms
-    if (!taskRefs.options.platforms) {
-        taskRefs.log.warn("Target platform(s) is not specified.");
-    }
+              //There is a bug in PhoneGap Build API that doesn't allow to trigger build for all platforms
+                  if (!taskRefs.options.platforms) {
+                  taskRefs.log.warn("Target platform(s) is not specified.");
+              }
 
     var config = {
         multipart: true
@@ -53,7 +52,8 @@ function start(taskRefs) {
         platforms: taskRefs.options.platforms || []
     };
     var postData = {data: JSON.stringify(data)};
-    taskRefs.needle.post('/api/v1/apps/'  + taskRefs.options.appId + '/build', postData, config, buildHandler);
+
+    taskRefs.needle.post('/api/v1/apps/'  + taskRefs.options.appId + '/build', postData, config, buildHandler)
   });
 
   taskRefs.needle = wrapNeedle("https://build.phonegap.com", taskRefs.options);
@@ -92,40 +92,24 @@ function unlockKeys(taskRefs, callback) {
 }
 
 function uploadZip(taskRefs, callback) {
-    var config = { },
-        data ={}
-    
-    var appTitle = (typeof taskRefs.options.title != 'undefined' ? taskRefs.options.title : "App title");
-    data.data = {
-        title : appTitle
-    }
-    if (typeof taskRefs.options.hydrates != 'undefined') {
-        data.data.hydrates = taskRefs.options.hydrates;
-    }
-    if (typeof taskRefs.options.private != 'undefined') {
-        data.data.private = taskRefs.options.private;
-    }
-    if (typeof taskRefs.options.hydrates != 'undefined') {
-        data.data.version = taskRefs.options.version;
-    }
-    if (typeof taskRefs.options.phonegap_version != 'undefined') {
-        data.data.phonegap_version = taskRefs.options.phonegap_version;
-    }
+  var config = { },
+      data;
 
-    if (taskRefs.options.isRepository) {
-        data.data.pull = true;
-        data.data.create_method = 'remote_repo';
-    } else {
-        data.data.create_method = 'file';
-        data.file = {
-            buffer: taskRefs.archive,
-            filename: 'app.zip',
-            content_type: 'application/octet-stream'
-        }
-        config.multipart = true;
-    }
+  if (taskRefs.options.isRepository) {
+    data = { data: { pull: true , create_method: 'remote_repo', title: 'app'}};
+  } else {
+    data = {
+      file: {
+          buffer: taskRefs.archive,
+          filename: 'app.zip',
+          content_type: 'application/octet-stream'
+      },
+      data: {create_method: 'file', title: 'app'}
+    };
+    config.multipart = true;
+  }
 
-    taskRefs.log.ok("Starting upload");
+  taskRefs.log.ok("Starting upload");
   if(taskRefs.options.appId)
     taskRefs.needle.put('/api/v1/apps/' + taskRefs.options.appId, data, config, callback);
   else
@@ -147,12 +131,12 @@ function downloadApps(taskRefs, callback) {
   function ready(platform, status, url) {
     platformsToDownload.splice(platformsToDownload.indexOf(platform), 1);
     if (status === 'complete') {
-      taskRefs.needle.get(url, null,
+      taskRefs.needle.get(url, {timeout:60000},
           responseHandler("Getting download location for " + platform, taskRefs, function (response, data) {
             taskRefs.log.ok("Downloading " + platform + " app");
             needle.get(data.location, null,
                 function (err, response, data) {
-                  taskRefs.log.ok("Downloaded " + platform + " app");
+                  taskRefs.log.ok("Downloaded " + platform + " app " + data.length + " bytes");
                   require('fs').writeFile(taskRefs.options.download[platform], data, completed);
                 }
             );
@@ -172,8 +156,8 @@ function downloadApps(taskRefs, callback) {
               ready(platform, data.status[platform], data.download[platform]);
             }
           });
-
-          timeoutId = setTimeout(check, taskRefs.options.pollRate);
+            if (platformsToDownload.length)
+                timeoutId = setTimeout(check, taskRefs.options.pollRate);
         })
     );
   }
@@ -203,24 +187,19 @@ module.exports = function (options) {
         zip.append(file.contents, { name: file.relative });
         cb();
     }, function () {
-      var   done = function () { self.emit('pg-sent'); taskRefs.log.ok('Application sent'); },
-            self = this,
+      var done = function () { taskRefs.log.ok('Application sent') },
             taskRefs = {
                 log: {
                     ok: function (msg) {
-                        self.emit('pg-info', msg);
                         gutil.log('phonegap-build - info', gutil.colors.cyan(msg));
                     },
                     fail: function (msg) {
-                        self.emit('pg-fail', msg);
                         gutil.log('phonegap-build - fail', gutil.colors.magenta(msg))
                     },
                     error: function (msg) {
-                        self.emit('pg-error', msg);
                         gutil.log('phonegap-build - error', gutil.colors.magenta(msg))
                     },
                     warn: function (msg) {
-                        self.emit('pg-warn', msg);
                         gutil.log('phonegap-build - warn', gutil.colors.magenta(msg))
                     }
                 }, options: opts, done: done,
